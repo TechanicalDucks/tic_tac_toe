@@ -51,7 +51,7 @@ impl RustNode {
     }
 
     #[func]
-    fn discover_peers() -> GString {
+    fn discover_peers(&self) -> GString {
         let (tx, rx) = mpsc::channel();
         spawn(async move {
             let peers = multicast_service::get_peers().await;
@@ -59,5 +59,10 @@ impl RustNode {
         });
         let peers = rx.recv().unwrap_or_default();
         peers.to_godot()
+    }
+
+    #[func]
+    fn stop_discovery_service(&self) {
+        spawn(async move { multicast_service::stop_service().await })
     }
 }
