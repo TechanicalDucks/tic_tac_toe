@@ -26,3 +26,10 @@ offset_right = 581.0
 offset_bottom = 339.0
 text = "LAN
 "
+
+[node name="PlayerId" type="Label" parent="."]
+offset_left = 482.0
+offset_top = 192.0
+offset_right = 576.0
+offset_bottom = 215.0
+text = "Player Id ???"
