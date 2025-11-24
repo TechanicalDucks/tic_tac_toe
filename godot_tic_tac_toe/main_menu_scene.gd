@@ -18,6 +18,9 @@ func _ready():
 	rust_node.start_discovery_service(random_palyer_id)
 
 	discover_loop(random_palyer_id)
+	
+	await rust_node.start_tic_tac_toe_server();
+	print("server started")
 
 func discover_loop(playerId) -> void:
 	while true:
