@@ -1,35 +1,99 @@
-[gd_scene load_steps=4 format=3 uid="uid://cx0v0mxalt308"]
+[gd_scene load_steps=5 format=3 uid="uid://cx0v0mxalt308"]
 
 [ext_resource type="Script" uid="uid://b46lrgkqx7lxv" path="res://main_menu_scene.gd" id="1_yuufg"]
+[ext_resource type="Texture2D" uid="uid://ccxvxi71ess6" path="res://image/main_menu_bg.jpg" id="2_kxo8s"]
+[ext_resource type="FontFile" uid="uid://1ls52k5bgeos" path="res://font/Debrosee-ALPnL.ttf" id="2_vws0r"]
 
 [sub_resource type="Theme" id="Theme_o4bv6"]
-
-[sub_resource type="SystemFont" id="SystemFont_o4bv6"]
 
 [node name="MainMenuScene" type="Node2D"]
 script = ExtResource("1_yuufg")
 
-[node name="PlayButton" type="Button" parent="."]
-offset_left = 481.0
-offset_top = 236.0
-offset_right = 581.0
-offset_bottom = 286.0
+[node name="TextureRect" type="TextureRect" parent="."]
+offset_right = 40.0
+offset_bottom = 40.0
+texture = ExtResource("2_kxo8s")
+
+[node name="Panel" type="Panel" parent="."]
+z_index = 1
+offset_right = 1280.0
+offset_bottom = 720.0
+
+[node name="MainLabel" type="Label" parent="Panel"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -68.0
+offset_top = 203.0
+offset_right = 68.0
+offset_bottom = 226.0
+grow_horizontal = 2
+theme_override_fonts/font = ExtResource("2_vws0r")
+theme_override_font_sizes/font_size = 45
+text = "Tic-Tac-Toe"
+
+[node name="PlayerId" type="Label" parent="Panel"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -68.0
+offset_top = -87.0
+offset_right = 68.0
+offset_bottom = -56.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_fonts/font = ExtResource("2_vws0r")
+theme_override_font_sizes/font_size = 25
+text = "Player Id ???"
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Panel"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -34.5
+offset_top = -30.0
+offset_right = 34.5
+offset_bottom = 120.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 15
+
+[node name="PlayButton" type="Button" parent="Panel/VBoxContainer"]
+texture_filter = 1
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 4
 theme = SubResource("Theme_o4bv6")
-theme_override_fonts/font = SubResource("SystemFont_o4bv6")
+theme_override_fonts/font = ExtResource("2_vws0r")
+theme_override_font_sizes/font_size = 30
 text = "Play
 "
 
-[node name="LanButton" type="Button" parent="."]
-offset_left = 481.0
-offset_top = 289.0
-offset_right = 581.0
-offset_bottom = 339.0
+[node name="LanButton" type="Button" parent="Panel/VBoxContainer"]
+texture_filter = 1
+layout_mode = 2
+theme_override_fonts/font = ExtResource("2_vws0r")
+theme_override_font_sizes/font_size = 30
 text = "LAN
 "
 
-[node name="PlayerId" type="Label" parent="."]
-offset_left = 482.0
-offset_top = 192.0
-offset_right = 576.0
-offset_bottom = 215.0
-text = "Player Id ???"
+[node name="ExitButton" type="Button" parent="Panel/VBoxContainer"]
+texture_filter = 1
+layout_mode = 2
+theme_override_fonts/font = ExtResource("2_vws0r")
+theme_override_font_sizes/font_size = 30
+text = "EXIT
+"
+
+[connection signal="pressed" from="Panel/VBoxContainer/PlayButton" to="." method="_on_play_button_pressed"]
+[connection signal="pressed" from="Panel/VBoxContainer/LanButton" to="." method="_on_lan_button_pressed"]
+[connection signal="pressed" from="Panel/VBoxContainer/ExitButton" to="." method="_on_exit_button_pressed"]

@@ -2,6 +2,7 @@ extends Node2D
 
 var rust_node
 
+
 func _ready():
 	rust_node = RustNode.new()
 	add_child(rust_node)
@@ -22,8 +23,21 @@ func _ready():
 	await rust_node.start_tic_tac_toe_server();
 	print("server started")
 
+
 func discover_loop(playerId) -> void:
 	while true:
 		var result = rust_node.discover_peers()
 		print("peers result for %s = %s" % [playerId, result])
 		await get_tree().create_timer(5.0).timeout
+
+
+func _on_exit_button_pressed():
+	get_tree().quit(0)
+
+
+func _on_lan_button_pressed():
+	pass 
+
+
+func _on_play_button_pressed():
+	pass 
