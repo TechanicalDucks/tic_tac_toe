@@ -1,3 +1,5 @@
+pub mod server;
+
 use godot::prelude::*;
 use rust_udp_multicast_test::multicast_service;
 
