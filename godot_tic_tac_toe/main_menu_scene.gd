@@ -13,8 +13,8 @@ func _ready():
 	var random_number = randi() % 20
 	var random_palyer_id = "Player %d" % random_number
 	
-	var playerIdNode = get_node("PlayerId")
-	playerIdNode.text = random_palyer_id
+	var playerIdNode = get_node("Panel/PlayerId")
+	playerIdNode.text = "Player ID: " + str(random_palyer_id)
 	
 	rust_node.start_discovery_service(random_palyer_id)
 
