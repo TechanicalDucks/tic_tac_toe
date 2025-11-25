@@ -5,4 +5,5 @@ pub struct RoomStateResponse{
     pub room_id: String,
     pub num_connections: usize,
     pub message: String,
+    pub success: bool,
 }

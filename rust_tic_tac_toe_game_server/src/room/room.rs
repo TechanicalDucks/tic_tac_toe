@@ -76,20 +76,47 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 
     // Register this connection in the shared room state and get its connection id.
-    let connection_id = {
+    // Change: perform an atomic check+insert under the same lock so we never exceed 2 connections.
+    let connection_opt_and_count = {
         let mut app_state = state.lock().await;
-        let id = app_state.next_connection_id;
-        app_state.next_connection_id = app_state.next_connection_id.wrapping_add(1);
-
-        let room = app_state
+        // First, read the current count without holding a mutable reference to a room entry.
+        let current_count = app_state
             .rooms
-            .entry(room_id.clone())
-            .or_insert_with(Room::new);
+            .get(&room_id)
+            .map(|r| r.connections.len())
+            .unwrap_or(0);
 
-        room.connections.insert(id, tx.clone());
-
-        id
+        if current_count >= 2 {
+            // Room already full: return (None, current_count)
+            (None, current_count)
+        } else {
+            // Reserve an id, then insert into the room (this ordering avoids overlapping borrows).
+            let id = app_state.next_connection_id;
+            app_state.next_connection_id = app_state.next_connection_id.wrapping_add(1);
+            let room = app_state.rooms.entry(room_id.clone()).or_insert_with(Room::new);
+            room.connections.insert(id, tx.clone());
+            (Some(id), current_count + 1)
+        }
     };
+
+    // If insertion was rejected because the room is full, notify the joining socket and close it.
+    if let (None, current_count) = connection_opt_and_count {
+        let payload = RoomStateResponse {
+            room_id: room_id.clone(),
+            num_connections: current_count,
+            message: "Room is full".to_string(),
+            success: false,
+        };
+
+        let json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+        // Send the JSON message and then send a Close frame to terminate connection cleanly.
+        let _ = sender.send(Message::Text(json.into())).await;
+        let _ = sender.send(Message::Close(None)).await;
+        return;
+    }
+
+    // Unwrap the assigned connection id (we know it's Some because we returned earlier if None)
+    let connection_id = connection_opt_and_count.0.unwrap();
 
     // Build RoomStateResponse for join notification
     let join_payload = {
@@ -107,6 +134,7 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
             room_id: room_id.clone(),
             num_connections,
             message: "Someone joined the room".to_string(),
+            success: true,
         }
     };
 
@@ -216,6 +244,7 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
             room_id: room_id.clone(),
             num_connections: num_remaining,
             message: "Someone left the room".to_string(),
+            success: true,
         }
     };
 
