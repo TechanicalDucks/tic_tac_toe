@@ -1,6 +1,7 @@
 mod room;
-mod response;
+mod responses;
+mod requests;
 
 pub use room::join_room;
-pub use response::*;
-pub use response::PlayerMark;
+pub use responses::*;
+pub use responses::PlayerMark;

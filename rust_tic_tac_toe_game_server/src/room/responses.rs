@@ -1,7 +1,7 @@
 use serde::Serialize;
 use serde_json::Value;
 
-#[derive(Serialize, Clone, Copy, Debug)]
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlayerMark {
     X,
     O,
@@ -32,9 +32,34 @@ impl RoomStateResponse {
 }
 
 #[derive(Serialize)]
+pub struct GameStateResponse {
+    pub room_id: String,
+    pub board: Vec<Vec<Option<String>>>,
+    pub current_turn: Option<String>,
+    pub winner: Option<String>,
+    pub started: bool,
+    pub moves_count: u8,
+}
+
+impl GameStateResponse {
+    pub fn to_json_value(&self) -> Value { serde_json::to_value(self).unwrap() }
+}
+
+#[derive(Serialize)]
+pub struct ErrorResponse {
+    pub room_id: String,
+    pub code: String,
+    pub message: String,
+}
+
+impl ErrorResponse { pub fn to_json_value(&self) -> Value { serde_json::to_value(self).unwrap() } }
+
+#[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseType {
     RoomState,
+    GameState,
+    Error,
 }
 
 #[derive(Serialize)]

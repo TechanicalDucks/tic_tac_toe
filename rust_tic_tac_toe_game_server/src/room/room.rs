@@ -5,7 +5,8 @@ use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use crate::server::{Room, SharedState};
-use crate::room::{RoomStateResponse, PlayerMark, RoomResponse, ResponseType};
+use crate::room::{RoomStateResponse, PlayerMark, RoomResponse, ResponseType, GameStateResponse, ErrorResponse};
+use crate::room::requests::{Payload, Action};
 
 pub async fn join_room(
     Path(room_id): Path<String>,
@@ -13,6 +14,55 @@ pub async fn join_room(
     State(state): State<SharedState>,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_join_room(room_id, socket, state))
+}
+
+// Helper: build serialized board for GameStateResponse
+fn serialize_board(board: &[[Option<PlayerMark>;3];3]) -> Vec<Vec<Option<String>>> {
+    board.iter().map(|row| {
+        row.iter().map(|cell| cell.map(|m| m.to_string())).collect()
+    }).collect()
+}
+
+fn build_game_state(room_id: &str, room: &Room) -> GameStateResponse {
+    GameStateResponse {
+        room_id: room_id.to_string(),
+        board: serialize_board(&room.board),
+        current_turn: if room.started && room.winner.is_none() { Some(room.current_turn.to_string()) } else { None },
+        winner: room.winner.map(|w| w.to_string()),
+        started: room.started,
+        moves_count: room.moves_count,
+    }
+}
+
+async fn broadcast_game_state(state: SharedState, room_id: &str) {
+    let (snapshot, game_state) = {
+        let app_state = state.lock().await;
+        if let Some(room) = app_state.rooms.get(room_id) {
+            let gs = build_game_state(room_id, room);
+            let mut senders = Vec::new();
+            for (&cid, (tx_conn, _mark)) in &room.connections { senders.push((cid, tx_conn.clone())); }
+            (senders, gs)
+        } else { return; }
+    };
+    let payload = RoomResponse { response_type: ResponseType::GameState, response: game_state.to_json_value()};
+    let json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+    let mut dead = Vec::new();
+    for (cid, tx) in &snapshot { if tx.send(json.clone()).is_err() { dead.push(*cid); } }
+    if !dead.is_empty() { cleanup_dead_connections(state.clone(), room_id, dead, None, None).await; }
+}
+
+async fn send_error(state: SharedState, room_id: &str, code: &str, message: &str, to_connection: crate::server::ConnectionId) {
+    let tx_opt = {
+        let app_state = state.lock().await;
+        app_state.rooms.get(room_id).and_then(|r| r.connections.get(&to_connection).map(|(tx, _)| tx.clone()))
+    };
+    if let Some(tx) = tx_opt {
+        let err = ErrorResponse { room_id: room_id.to_string(), code: code.to_string(), message: message.to_string() };
+        let payload = RoomResponse { response_type: ResponseType::Error, response: err.to_json_value()};
+        if tx.send(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())).is_err() {
+            cleanup_dead_connections(state.clone(), room_id, vec![to_connection], None, None).await;
+        }
+    }
 }
 
 // New helper: centralize dead-connection cleanup to avoid duplication and optionally announce a message
@@ -131,7 +181,7 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
     // Unwrap the assigned connection id and mark (we know it's Some because we returned earlier if None)
     let connection_id = connection_opt_and_count_and_mark.0.unwrap();
 
-    // Build per-recipient RoomStateResponse for join notification and broadcast to everyone in the room
+    // Broadcast join notification
     {
         let mut dead_connections = Vec::new();
         let mut snapshot: Vec<(crate::server::ConnectionId, mpsc::UnboundedSender<String>, PlayerMark)> = Vec::new();
@@ -166,13 +216,25 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
         }
 
         if !dead_connections.is_empty() {
-            // Use centralized helper (no announce, no exclude) to remove dead connections
             cleanup_dead_connections(state.clone(), &room_id, dead_connections, None, None).await;
         }
     }
 
+    // If second player joined, auto-start game
+    {
+        let mut should_start = false;
+        {
+            let mut app_state = state.lock().await;
+            if let Some(room) = app_state.rooms.get_mut(&room_id) {
+                if room.connections.len() == 2 && !room.started { should_start = room.start_game().is_ok(); }
+            }
+        }
+        if should_start { broadcast_game_state(state.clone(), &room_id).await; }
+    }
+
     let state_for_recv = state.clone();
     let room_id_for_recv = room_id.clone();
+    let my_mark = connection_opt_and_count_and_mark.2;
 
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
@@ -188,35 +250,48 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
 
     let recv_task = tokio::spawn(async move {
         while let Some(msg) = receiver.next().await {
-            if msg.is_err() {
-                break;
-            }
-
+            if msg.is_err() { break; }
             match msg {
                 Ok(msg_result) => {
                     if let Message::Text(text) = msg_result {
-                        // Broadcast this message to all connections in the same room
-                        let mut dead_connections = Vec::new();
-                        let mut senders = Vec::new();
-
-                        {
-                            let app_state = state_for_recv.lock().await;
-                            if let Some(room) = app_state.rooms.get(&room_id_for_recv) {
-                                for (&cid, (tx_conn, _mark)) in &room.connections {
-                                    senders.push((cid, tx_conn.clone()));
+                        // Parse JSON payload
+                        let parsed: Result<Payload, _> = serde_json::from_str(&text);
+                        match parsed {
+                            Ok(payload) => {
+                                match payload.action {
+                                    Action::StartGame => {
+                                        let mut ok = false; let mut err: Option<&'static str> = None;
+                                        {
+                                            let mut app_state = state_for_recv.lock().await;
+                                            if let Some(room) = app_state.rooms.get_mut(&room_id_for_recv) {
+                                                match room.start_game() { Ok(()) => ok = true, Err(e) => err = Some(e) }
+                                            } else { err = Some("room_not_found"); }
+                                        }
+                                        if ok { broadcast_game_state(state_for_recv.clone(), &room_id_for_recv).await; }
+                                        else if let Some(code) = err { send_error(state_for_recv.clone(), &room_id_for_recv, code, code, connection_id).await; }
+                                    }
+                                    Action::MakeMove => {
+                                        if let Some(mp) = payload.move_payload {
+                                            let mut res: Result<(), &'static str> = Ok(());
+                                            {
+                                                let mut app_state = state_for_recv.lock().await;
+                                                if let Some(room) = app_state.rooms.get_mut(&room_id_for_recv) {
+                                                    res = room.make_move(my_mark, mp.x, mp.y);
+                                                } else { res = Err("room_not_found"); }
+                                            }
+                                            match res {
+                                                Ok(()) => broadcast_game_state(state_for_recv.clone(), &room_id_for_recv).await,
+                                                Err(code) => send_error(state_for_recv.clone(), &room_id_for_recv, code, code, connection_id).await,
+                                            }
+                                        } else {
+                                            send_error(state_for_recv.clone(), &room_id_for_recv, "missing_move_payload", "missing_move_payload", connection_id).await;
+                                        }
+                                    }
                                 }
                             }
-                        }
-
-                        for (cid, tx_conn) in &senders {
-                            if tx_conn.send(text.clone().to_string()).is_err() {
-                                dead_connections.push(*cid);
+                            Err(_e) => {
+                                send_error(state_for_recv.clone(), &room_id_for_recv, "invalid_json", "invalid_json", connection_id).await;
                             }
-                        }
-
-                        if !dead_connections.is_empty() {
-                            // Use centralized helper (no announce, no exclude)
-                            cleanup_dead_connections(state_for_recv.clone(), &room_id_for_recv, dead_connections, None, None).await;
                         }
                     }
                 }
@@ -225,10 +300,7 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
         }
     });
 
-    tokio::select! {
-        _ = send_task => {},
-        _ = recv_task => {},
-    }
+    tokio::select! { _ = send_task => {}, _ = recv_task => {}, }
 
     // Send leave announcement to others (exclude leaving conn)
     {
@@ -274,8 +346,6 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
     let mut app_state = state.lock().await;
     if let Some(room) = app_state.rooms.get_mut(&room_id) {
         room.connections.remove(&connection_id);
-        if room.connections.is_empty() {
-            app_state.rooms.remove(&room_id);
-        }
+        if room.connections.is_empty() { app_state.rooms.remove(&room_id); }
     }
 }
