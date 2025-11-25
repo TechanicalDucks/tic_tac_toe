@@ -6,8 +6,17 @@ pub enum PlayerMark {
     O,
 }
 
+impl PlayerMark {
+    pub fn to_string(&self) -> String {
+        match self {
+            PlayerMark::X => "X".to_string(),
+            PlayerMark::O => "O".to_string(),
+        }
+    }
+}
+
 #[derive(Serialize)]
-pub struct RoomStateResponse{
+pub struct RoomStateResponse {
     pub room_id: String,
     pub num_connections: usize,
     pub message: String,

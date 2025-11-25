@@ -267,7 +267,7 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
             let payload = RoomStateResponse {
                 room_id: room_id.clone(),
                 num_connections: senders.len(),
-                message: "Someone left the room".to_string(),
+                message: format!("Player {} left the room", mark.to_string()),
                 success: true,
                 my_mark: *mark,
             };
