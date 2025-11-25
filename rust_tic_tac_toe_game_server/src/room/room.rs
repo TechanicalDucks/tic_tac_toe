@@ -5,7 +5,7 @@ use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use crate::server::{Room, SharedState};
-use crate::room::{RoomStateResponse, PlayerMark};
+use crate::room::{RoomStateResponse, PlayerMark, RoomResponse, ResponseType};
 
 pub async fn join_room(
     Path(room_id): Path<String>,
@@ -108,12 +108,17 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
 
     // If insertion was rejected because the room is full, notify the joining socket and close it.
     if let (None, current_count, _mark) = connection_opt_and_count_and_mark {
-        let payload = RoomStateResponse {
+        let room_state_response = RoomStateResponse {
             room_id: room_id.clone(),
             num_connections: current_count,
             message: "Room is full".to_string(),
             success: false,
             my_mark: PlayerMark::X, // dummy
+        };
+
+        let payload = RoomResponse {
+            response_type: ResponseType::RoomState,
+            response: room_state_response.to_json_value(),
         };
 
         let json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
@@ -125,7 +130,6 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
 
     // Unwrap the assigned connection id and mark (we know it's Some because we returned earlier if None)
     let connection_id = connection_opt_and_count_and_mark.0.unwrap();
-    let my_mark = connection_opt_and_count_and_mark.2;
 
     // Build per-recipient RoomStateResponse for join notification and broadcast to everyone in the room
     {
@@ -142,12 +146,17 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
         }
 
         for (cid, tx_conn, mark) in &snapshot {
-            let payload = RoomStateResponse {
+            let room_state_response = RoomStateResponse {
                 room_id: room_id.clone(),
                 num_connections: snapshot.len(),
                 message: "Someone joined the room".to_string(),
                 success: true,
                 my_mark: *mark,
+            };
+
+            let payload = RoomResponse {
+                response_type: ResponseType::RoomState,
+                response: room_state_response.to_json_value(),
             };
 
             let json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
@@ -221,31 +230,6 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
         _ = recv_task => {},
     }
 
-    // On disconnect, announce to the remaining connections and then remove this connection from the room
-    // Announce "Someone left the room" to everyone except the leaving connection.
-    // Build leave payload with accurate remaining count
-    let leave_payload = {
-        // Compute remaining connections count after this one leaves
-        let num_remaining = {
-            let app_state = state.lock().await;
-            app_state
-                .rooms
-                .get(&room_id)
-                .map(|r| r.connections.len().saturating_sub(1))
-                .unwrap_or(0)
-        };
-
-        RoomStateResponse {
-            room_id: room_id.clone(),
-            num_connections: num_remaining,
-            message: "Someone left the room".to_string(),
-            success: true,
-            my_mark: PlayerMark::X,
-        }
-    };
-
-    let leave_json = serde_json::to_string(&leave_payload).unwrap_or_else(|_| "{}".to_string());
-
     // Send leave announcement to others (exclude leaving conn)
     {
         let mut dead_connections = Vec::new();
@@ -264,12 +248,16 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
 
         for (cid, tx_conn, mark) in &senders {
             // Build a per-recipient leave payload including their own mark
-            let payload = RoomStateResponse {
+            let room_state_response = RoomStateResponse {
                 room_id: room_id.clone(),
                 num_connections: senders.len(),
                 message: format!("Player {} left the room", mark.to_string()),
                 success: true,
                 my_mark: *mark,
+            };
+            let payload = RoomResponse {
+                response_type: ResponseType::RoomState,
+                response: room_state_response.to_json_value(),
             };
 
             let json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
