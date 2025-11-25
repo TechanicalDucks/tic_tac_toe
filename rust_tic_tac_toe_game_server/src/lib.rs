@@ -1,4 +1,5 @@
 pub mod server;
+mod room;
 
 use godot::prelude::*;
 use rust_udp_multicast_test::multicast_service;
