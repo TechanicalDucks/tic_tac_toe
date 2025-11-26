@@ -26,7 +26,7 @@ ws.onclose = () => console.log('Closed');
 ---
 ## 2. Outgoing Responses From Server
 All messages sent by the server are JSON objects wrapped in a common envelope:
-```js
+```json
 {
   "response_type": "room_state or game_state or error",
   "response": "object"
@@ -67,6 +67,7 @@ Sent:
 - Automatically when the second player joins (game auto-starts).
 - After a valid move.
 - After a successful manual start (`start_game` action).
+- After a successful restart (`restart_game` action).
 
 Payload shape:
 ```json
@@ -132,6 +133,7 @@ Action / flow errors:
 - `out_of_bounds`
 - `cell_occupied`
 - `missing_move_payload`
+- `restart_not_allowed` (attempted `restart_game` when game isn't finished or not enough players)
 Parsing / protocol errors:
 - `invalid_json`
 
@@ -141,7 +143,7 @@ Clients send plain text WebSocket messages containing JSON request payloads.
 Request schema:
 ```json
 {
-  "action": "start_game or make_move",
+  "action": "start_game or make_move or restart_game",
   "move_payload": { "x": 0, "y": 2 } 
 }
 ```
@@ -170,6 +172,28 @@ Responses:
 - Turns alternate after each successful non-terminal move.
 - After win or draw, further `make_move` attempts yield `game_already_finished`.
 
+### 3.3 Restart Game (new)
+Clients can request a game restart using the `restart_game` action. This action is intended to restart a finished game (win or draw) without players disconnecting.
+
+Request:
+```json
+{ "action": "restart_game" }
+```
+
+Rules & behavior (assumptions / server contract):
+- Allowed only when the room currently has 2 connected players and the previous game has finished (either `winner` is set or `moves_count >= 9`).
+- On success the server resets the board to all `null`, sets `started` to `true`, `current_turn` to `x`, `winner` to `null`, and `moves_count` to `0`.
+- The server broadcasts a `game_state` update to all players reflecting the reset board and new turn order.
+- If the request is sent while the game is still in progress or there are fewer than two players, the server responds with an `error` (code: `restart_not_allowed` or `not_enough_players`).
+
+Responses:
+- On success: `game_state` broadcast with a fresh game board and `current_turn = "x"`.
+- On failure: `error` (e.g., `restart_not_allowed`, `not_enough_players`).
+
+Notes for clients:
+- If you want the ability to request a restart immediately after a finished game, call `restart_game` once you receive a `game_state` that has a `winner` or `current_turn` set to `null` (draw).
+- Clients should handle the incoming `game_state` broadcast by resetting local UI state to the new board and current turn.
+
 ---
 ## 4. Lifecycle Example
 1. Player A connects (`my_mark = "x"`). Receives `room_state`.
@@ -177,7 +201,9 @@ Responses:
 3. Player A sends `make_move (0,0)`. All receive updated `game_state` (board[0][0] = "x", `current_turn = "o").
 4. Player B sends `make_move (0,1)`. Broadcast `game_state`.
 5. ... continue until win or draw.
-6. A player disconnects → remaining player receives a `room_state` leave message.
+6. After the game finishes (win or draw), either player may send `{ "action": "restart_game" }`.
+   - If accepted, both players receive a fresh `game_state` and play resumes with `x` to move.
+7. A player disconnects → remaining player receives a `room_state` leave message.
 
 ---
 ## 5. Board Representation
@@ -211,9 +237,9 @@ Endpoint: `ws://<host>:3000/join/{room_id}`
 Request Actions:
 - `start_game`
 - `make_move` with `{"x":0..2,"y":0..2}`
+- `restart_game` (restart a finished game when both players are present)
 Response Envelope: `{ "response_type": "room_state" | "game_state" | "error", "response": <object> }`
-Key Error Codes: `not_your_turn`, `cell_occupied`, `out_of_bounds`, `game_not_started`, `game_already_finished`, `invalid_json`, ...
+Key Error Codes: `not_your_turn`, `cell_occupied`, `out_of_bounds`, `game_not_started`, `game_already_finished`, `restart_not_allowed`, `invalid_json`, ...
 
 ---
 Happy hacking!
-
