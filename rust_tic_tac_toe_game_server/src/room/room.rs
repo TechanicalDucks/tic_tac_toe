@@ -287,6 +287,27 @@ async fn handle_join_room(room_id: String, socket: WebSocket, state: SharedState
                                             send_error(state_for_recv.clone(), &room_id_for_recv, "missing_move_payload", "missing_move_payload", connection_id).await;
                                         }
                                     }
+                                    Action::RestartGame => {
+                                        let mut ok = false; let mut err: Option<&'static str> = None;
+                                        {
+                                            let mut app_state = state_for_recv.lock().await;
+                                            if let Some(room) = app_state.rooms.get_mut(&room_id_for_recv) {
+                                                // Require two players to auto-restart
+                                                if room.connections.len() < 2 {
+                                                    err = Some("not_enough_players");
+                                                } else {
+                                                    room.board = [[None; 3]; 3];
+                                                    room.winner = None;
+                                                    room.moves_count = 0;
+                                                    room.current_turn = PlayerMark::X;
+                                                    room.started = true;
+                                                    ok = true;
+                                                }
+                                            } else { err = Some("room_not_found"); }
+                                        }
+                                        if ok { broadcast_game_state(state_for_recv.clone(), &room_id_for_recv).await; }
+                                        else if let Some(code) = err { send_error(state_for_recv.clone(), &room_id_for_recv, code, code, connection_id).await; }
+                                    }
                                 }
                             }
                             Err(_e) => {

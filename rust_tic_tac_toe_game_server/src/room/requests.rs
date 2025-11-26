@@ -5,6 +5,7 @@ use serde::Deserialize;
 pub enum Action {
     MakeMove,
     StartGame,
+    RestartGame,
 }
 
 #[derive(Deserialize)]
